@@ -15,7 +15,7 @@ const compression = require('compression');
 const bodyParser = require('body-parser');
 const fs = require('fs');
 const HashMap = require('hashmap');
-const uuidv4 = require('uuid/v4');
+const {v4: uuidv4} = require('uuid');
 const exec = require('child_process').exec;
 
 // Constants
@@ -156,7 +156,7 @@ function adminAccess(middleware) {
 
 // Setup Global Middlewares
 api.use(compression());
-api.use(bodyParser.urlencoded({ extended: true }));
+api.use(bodyParser.json());
 api.use(function (req, res, next) {
 	// Website you wish to allow to connect
 	res.setHeader('Access-Control-Allow-Origin', '*');
@@ -403,9 +403,10 @@ api.get('/beverages', userAccess(function (req, res, next) {
 api.post('/beverages', adminAccess(function (req, res, next) {
 	let bev = req.query.beverage;
 	let price = req.query.price;
+	let count = req.query.count || 0;
 	if (bev != undefined && price != undefined && bev != '') {
-		let stmt = prepare("INSERT INTO Beverages (name, price) VALUES (?, ?)");
-		stmt.run(bev, price, catchDBerror(stmt, req, next));
+		let stmt = prepare("INSERT INTO Beverages (name, price, stock) VALUES (?, ?, ?)");
+		stmt.run(bev, price, count, catchDBerror(stmt, req, next));
 		res.sendStatus(200);
 	} else {
 		throw { name: 'Generic Error', message: 'Generic Error Message' };
@@ -568,6 +569,59 @@ api.post('/logout', function (req, res, next) {
 	}
 	res.sendStatus(200);
 });
+
+// Admin dashboard statistics
+api.get('/stats/orders', adminAccess(function (req, res, next) {
+  let orderCount = 0;
+  const stmt = prepare('SELECT COUNT(*) FROM History;')
+  stmt.get(function (err, result) {
+    if (err) { return catchDBerror(stmt, req, next, err); }
+    res.status(200).json(result['COUNT(*)']);
+  })
+}))
+
+api.get('/stats/users', adminAccess(function (req, res, next) {
+  let orderCount = 0;
+  const stmt = prepare('SELECT COUNT(*) FROM Users;')
+  stmt.get(function (err, result) {
+    if (err) { return catchDBerror(stmt, req, next, err); }
+    res.status(200).json(result['COUNT(*)']);
+  })
+}))
+
+api.get('/stats/beverages', adminAccess(function (req, res, next) {
+  const stmt = prepare('SELECT COUNT(*) FROM Beverages;')
+  stmt.get(function (err, result) {
+    if (err) { return catchDBerror(stmt, req, next, err); }
+    res.status(200).json(result['COUNT(*)']);
+  })
+}))
+
+api.get('/stats/top/beverages', adminAccess(function (req, res, next) {
+  const stmt = prepare('SELECT b.name, b.stock, b.price FROM (SELECT beverage, COUNT(beverage) AS count FROM History WHERE beverage != "" GROUP BY beverage ORDER BY count DESC) t INNER JOIN Beverages b ON t.beverage = b.name LIMIT 5;')
+  stmt.all(
+    function (err, result) {
+      if (err) { return catchDBerror(stmt, req, next, err); }
+      res.status(200).json(result)
+    })
+}))
+
+api.get('/stats/top/savers', adminAccess(function (req, res, next) {
+  const stmt = prepare('SELECT name, balance, hidden FROM Users ORDER BY balance DESC LIMIT 5;')
+  stmt.all(function (err, result) {
+    if (err) { return catchDBerror(stmt, req, next, err); }
+    res.status(200).json(result);
+  })
+}))
+
+api.get('/stats/top/debtors', adminAccess(function (req, res, next) {
+  const stmt = prepare('SELECT name, balance, hidden FROM Users ORDER BY balance ASC LIMIT 5;')
+  stmt.all(function (err, result) {
+    if (err) { return catchDBerror(stmt, req, next, err); }
+    res.status(200).json(result);
+  })
+}))
+
 
 // Error Handling Middleware
 api.use(function (err, req, res, next) {
